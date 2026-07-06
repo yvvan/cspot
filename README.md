@@ -1,3 +1,12 @@
+## Fork note
+
+This repository is a fork of cspot with additional AI-assisted code changes
+made to get cspot running on an AI Thinker A1S Audio Kit ESP32 board with the
+ES8388 audio codec. In this setup, cspot eventually ran and worked on my board.
+
+This fork has not been tested extensively. I later moved to Music Assistant and
+now play Spotify through it, with my Audio Kit board used as a Snapcast client.
+
 ![C/C++ CI](https://github.com/feelfreelinux/cspot/workflows/C/C++%20CI/badge.svg)
 ![ESP IDF](https://github.com/feelfreelinux/cspot/workflows/ESP%20IDF/badge.svg)
 [![Certification](https://badgen.net/badge/Stary%20Filipa/certified?color=purple)](https://github.com/feelfreelinux/cspot)
