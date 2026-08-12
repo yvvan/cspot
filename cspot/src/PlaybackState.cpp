@@ -111,10 +111,14 @@ void PlaybackState::setPlaybackState(const PlaybackState::State state) {
 }
 
 void PlaybackState::syncWithRemote() {
-  innerFrame.state.context_uri = (char*)realloc(
-      innerFrame.state.context_uri, strlen(remoteFrame.state.context_uri) + 1);
-
-  strcpy(innerFrame.state.context_uri, remoteFrame.state.context_uri);
+  // remoteFrame.state.context_uri is an optional nanopb string: a Web-API-initiated
+  // play/transfer frame can omit it (NULL), whereas the phone app always sends one.
+  // strlen(NULL) here was a LoadProhibited crash on every agent-issued play.
+  if (remoteFrame.state.context_uri != nullptr) {
+    innerFrame.state.context_uri = (char*)realloc(
+        innerFrame.state.context_uri, strlen(remoteFrame.state.context_uri) + 1);
+    strcpy(innerFrame.state.context_uri, remoteFrame.state.context_uri);
+  }
 
   innerFrame.state.has_playing_track_index = true;
   innerFrame.state.playing_track_index = remoteFrame.state.playing_track_index;
