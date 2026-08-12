@@ -1,0 +1,6 @@
+description: "cspot Spotify Connect library wrapped as an ESP-IDF component"
+version: "0.1.0"
+dependencies:
+  idf:
+    version: ">=5.0.0"
+  espressif/mdns: "^1.2.0"

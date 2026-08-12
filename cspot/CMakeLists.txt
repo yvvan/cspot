@@ -27,7 +27,7 @@ endif()
 # Build protobuf code
 # Use pre-generated files when available (avoids nanopb Python protobuf version conflicts).
 # The pre-generated directory lives at <project_root>/proto_generated relative to this file.
-set(_PREGENERATED "${CMAKE_CURRENT_SOURCE_DIR}/../../../proto_generated")
+set(_PREGENERATED "${CMAKE_CURRENT_SOURCE_DIR}/../proto_generated")
 if(EXISTS "${_PREGENERATED}")
     file(GLOB PROTO_SRCS "${_PREGENERATED}/protobuf/*.c")
     file(GLOB PROTO_HDRS "${_PREGENERATED}/protobuf/*.h")
