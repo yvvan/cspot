@@ -7,6 +7,7 @@
 #include <vector>            // for vector
 
 #include "HTTPClient.h"  // for HTTPClient, HTTPClient::Response
+#include "Logger.h"      // for CSPOT_LOG
 #ifdef BELL_ONLY_CJSON
 #include "cJSON.h"
 #else
