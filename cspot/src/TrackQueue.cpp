@@ -291,6 +291,11 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
       auto req = bell::HTTPClient::get(
           requestUrl, {bell::HTTPClient::ValueHeader(
                           {"Authorization", "Bearer " + accessKey})});
+      if (req == nullptr) {
+        CSPOT_LOG(error, "CDN URL request failed (attempt %d)", attempt + 1);
+        if (attempt < 4) BELL_SLEEP_MS(2000);
+        continue;
+      }
 
       int sc = req->statusCode();
       std::string_view result = req->body();

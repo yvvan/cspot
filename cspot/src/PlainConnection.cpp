@@ -42,7 +42,7 @@ PlainConnection::~PlainConnection() {
   this->close();
 };
 
-void PlainConnection::connect(const std::string& apAddress) {
+bool PlainConnection::connect(const std::string& apAddress) {
   struct addrinfo h, *airoot, *ai;
   std::string hostname = apAddress.substr(0, apAddress.find(":"));
   std::string portStr =
@@ -55,6 +55,7 @@ void PlainConnection::connect(const std::string& apAddress) {
   // Lookup host
   if (getaddrinfo(hostname.c_str(), portStr.c_str(), &h, &airoot)) {
     CSPOT_LOG(error, "getaddrinfo failed");
+    return false;
   }
 
   // find the right ai, connect to server
@@ -95,11 +96,14 @@ void PlainConnection::connect(const std::string& apAddress) {
     ::close(this->apSock);
 #endif
     apSock = -1;
-    std::abort();  // exceptions-free build (was: throw)
+    freeaddrinfo(airoot);
+    CSPOT_LOG(error, "Could not connect to the AP");
+    return false;
   }
 
   freeaddrinfo(airoot);
   CSPOT_LOG(debug, "Connected to spotify server");
+  return true;
 }
 
 std::vector<uint8_t> PlainConnection::recvPacket() {

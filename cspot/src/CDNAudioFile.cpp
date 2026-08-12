@@ -1,4 +1,5 @@
 #include "CDNAudioFile.h"
+#include "BellUtils.h"
 
 #include <string.h>          // for memcpy
 #include <functional>        // for __base
@@ -43,9 +44,20 @@ void CDNAudioFile::openStream() {
   CSPOT_LOG(info, "Opening HTTP stream to %s", this->cdnUrl.c_str());
 
   // Open connection, read first 128 bytes
-  this->httpConnection = bell::HTTPClient::get(
+  for (int cdnAttempt = 0; cdnAttempt < 5; cdnAttempt++) {
+    this->httpConnection = bell::HTTPClient::get(
       this->cdnUrl,
       {bell::HTTPClient::RangeHeader::range(0, OPUS_HEADER_SIZE - 1)});
+    if (this->httpConnection != nullptr) {
+      break;
+    }
+    CSPOT_LOG(error, "CDN connection failed (attempt %d)", cdnAttempt + 1);
+    BELL_SLEEP_MS(2000);
+  }
+  if (this->httpConnection == nullptr) {
+    CSPOT_LOG(error, "CDN connection failed permanently");
+    std::abort();  // exceptions-free build: unrecoverable without caller support
+  }
 
   this->httpConnection->stream().read((char*)header.data(), OPUS_HEADER_SIZE);
   this->totalFileSize =

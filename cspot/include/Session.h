@@ -32,7 +32,7 @@ class Session {
   std::shared_ptr<cspot::ShannonConnection> shanConn;
 
   void connect(std::unique_ptr<cspot::PlainConnection> connection);
-  void connectWithRandomAp();
+  bool connectWithRandomAp();
   void close();
   virtual bool triggerTimeout() = 0;
   std::vector<uint8_t> authenticate(std::shared_ptr<LoginBlob> blob);

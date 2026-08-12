@@ -26,7 +26,7 @@ class PlainConnection {
    * 
    * @param apAddress The AP url to connect to
    */
-  void connect(const std::string& apAddress);
+  bool connect(const std::string& apAddress);
   void close();
 
   timeoutCallback timeoutHandler;

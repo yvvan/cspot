@@ -55,7 +55,7 @@ void Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
                                  challenges->shanRecvKey);
 }
 
-void Session::connectWithRandomAp() {
+bool Session::connectWithRandomAp() {
   auto apResolver = std::make_unique<ApResolve>("");
   auto conn = std::make_unique<cspot::PlainConnection>();
   conn->timeoutHandler = [this]() {
@@ -63,11 +63,18 @@ void Session::connectWithRandomAp() {
   };
 
   auto apAddr = apResolver->fetchFirstApAddress();
+  if (apAddr.empty()) {
+    CSPOT_LOG(error, "AP resolve failed; will retry later");
+    return false;
+  }
 
   CSPOT_LOG(debug, "Connecting with AP <%s>", apAddr.c_str());
-  conn->connect(apAddr);
+  if (!conn->connect(apAddr)) {
+    return false;
+  }
 
   this->connect(std::move(conn));
+  return true;
 }
 
 std::vector<uint8_t> Session::authenticate(std::shared_ptr<LoginBlob> blob) {

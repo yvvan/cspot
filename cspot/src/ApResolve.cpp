@@ -26,7 +26,15 @@ std::string ApResolve::fetchFirstApAddress() {
   }
 
   auto request = bell::HTTPClient::get("https://apresolve.spotify.com/");
+  if (request == nullptr) {
+    CSPOT_LOG(error, "apresolve request failed");
+    return "";
+  }
   std::string_view responseStr = request->body();
+  if (responseStr.empty()) {
+    CSPOT_LOG(error, "apresolve returned an empty body");
+    return "";
+  }
 
   // parse json with nlohmann
 #ifdef BELL_ONLY_CJSON
@@ -36,7 +44,11 @@ std::string ApResolve::fetchFirstApAddress() {
   cJSON_Delete(json);
   return ap_string;
 #else
-  auto json = nlohmann::json::parse(responseStr);
+  auto json = nlohmann::json::parse(responseStr, nullptr, false);
+  if (json.is_discarded() || !json.contains("ap_list") || json["ap_list"].empty()) {
+    CSPOT_LOG(error, "apresolve returned unparsable data");
+    return "";
+  }
   return json["ap_list"][0];
 #endif
 }
