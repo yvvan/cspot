@@ -1,6 +1,7 @@
 #ifndef UTILS_H
 #define UTILS_H
-#include <cstdio>  // for snprintf, size_t
+#include <cstdio>
+#include <cstdlib>  // for snprintf, size_t
 #include <vector>  // for vector
 #ifdef _WIN32
 #include <winsock2.h>
@@ -108,7 +109,7 @@ std::string string_format(const std::string& format, Args... args) {
   int size_s = std::snprintf(nullptr, 0, format.c_str(), args...) +
                1;  // Extra space for '\0'
   if (size_s <= 0) {
-    throw std::runtime_error("Error during formatting.");
+    std::abort();  // exceptions-free build (was: throw)
   }
   auto size = static_cast<size_t>(size_s);
   std::unique_ptr<char[]> buf(new char[size]);

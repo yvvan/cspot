@@ -37,27 +37,18 @@ void MercurySession::runTask() {
   this->executeEstabilishedCallback = true;
   while (isRunning) {
     cspot::Packet packet = {};
-    try {
-      packet = shanConn->recvPacket();
-      CSPOT_LOG(info, "Received packet, command: %d", packet.command);
+    // exceptions-free build: recv failures currently abort inside the connection
+    // layer; TODO restore the reconnect path via status returns from recvPacket.
+    packet = shanConn->recvPacket();
+    CSPOT_LOG(info, "Received packet, command: %d", packet.command);
 
-      if (static_cast<RequestType>(packet.command) == RequestType::PING) {
-        timeProvider->syncWithPingPacket(packet.data);
+    if (static_cast<RequestType>(packet.command) == RequestType::PING) {
+      timeProvider->syncWithPingPacket(packet.data);
 
-        this->lastPingTimestamp = timeProvider->getSyncedTimestamp();
-        this->shanConn->sendPacket(0x49, packet.data);
-      } else {
-        this->packetQueue.push(packet);
-      }
-    } catch (const std::runtime_error& e) {
-      CSPOT_LOG(error, "Error while receiving packet: %s", e.what());
-      failAllPending();
-
-      if (!isRunning)
-        return;
-
-      reconnect();
-      continue;
+      this->lastPingTimestamp = timeProvider->getSyncedTimestamp();
+      this->shanConn->sendPacket(0x49, packet.data);
+    } else {
+      this->packetQueue.push(packet);
     }
   }
 }
@@ -65,29 +56,20 @@ void MercurySession::runTask() {
 void MercurySession::reconnect() {
   isReconnecting = true;
 
-  try {
-    this->conn = nullptr;
-    this->shanConn = nullptr;
+  this->conn = nullptr;
+  this->shanConn = nullptr;
 
-    this->connectWithRandomAp();
-    this->authenticate(this->authBlob);
+  this->connectWithRandomAp();
+  this->authenticate(this->authBlob);
 
-    CSPOT_LOG(info, "Reconnection successful");
+  CSPOT_LOG(info, "Reconnection successful");
 
-    BELL_SLEEP_MS(100);
+  BELL_SLEEP_MS(100);
 
-    lastPingTimestamp = timeProvider->getSyncedTimestamp();
-    isReconnecting = false;
+  lastPingTimestamp = timeProvider->getSyncedTimestamp();
+  isReconnecting = false;
 
-    this->executeEstabilishedCallback = true;
-  } catch (...) {
-    CSPOT_LOG(error, "Cannot reconnect, will retry in 5s");
-    BELL_SLEEP_MS(5000);
-
-    if (isRunning) {
-      return reconnect();
-    }
-  }
+  this->executeEstabilishedCallback = true;
 }
 
 void MercurySession::setConnectedHandler(
@@ -305,13 +287,9 @@ uint64_t MercurySession::executeSubscription(RequestType method,
   // Bump sequence id
   this->sequenceId += 1;
 
-  try {
-    this->shanConn->sendPacket(
-        static_cast<std::underlying_type<RequestType>::type>(method),
-        sequenceIdBytes);
-  } catch (...) {
-    // @TODO: handle disconnect
-  }
+  this->shanConn->sendPacket(
+      static_cast<std::underlying_type<RequestType>::type>(method),
+      sequenceIdBytes);
 
   return this->sequenceId - 1;
 }
@@ -337,11 +315,7 @@ uint32_t MercurySession::requestAudioKey(const std::vector<uint8_t>& trackId,
 
   // Used for broken connection detection
   // this->lastRequestTimestamp = timeProvider->getSyncedTimestamp();
-  try {
-    this->shanConn->sendPacket(
-        static_cast<uint8_t>(RequestType::AUDIO_KEY_REQUEST_COMMAND), buffer);
-  } catch (...) {
-    // @TODO: Handle disconnect
-  }
+  this->shanConn->sendPacket(
+      static_cast<uint8_t>(RequestType::AUDIO_KEY_REQUEST_COMMAND), buffer);
   return audioKeySequence - 1;
 }

@@ -1,4 +1,5 @@
 #include "TrackQueue.h"
+#include <cstdlib>
 #include <pb_decode.h>
 
 #include <algorithm>
@@ -281,7 +282,7 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
 
   // Retry up to 5 times to handle transient 429 rate limits
   for (int attempt = 0; attempt < 5; attempt++) {
-    try {
+    {
       std::string requestUrl = string_format(
           "https://api.spotify.com/v1/storage-resolve/files/audio/interactive"
           "/%s?alt=json&product=9",
@@ -301,20 +302,20 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
       }
       if (sc != 200) {
         CSPOT_LOG(error, "CDN URL HTTP error %d, body: %.*s", sc, (int)result.size(), result.data());
-        throw std::runtime_error("CDN URL HTTP error " + std::to_string(sc));
+        std::abort();  // exceptions-free build (was: throw)
       }
 
 #ifdef BELL_ONLY_CJSON
       cJSON* jsonResult = cJSON_Parse(result.data());
       cJSON* cdnurlArr = cJSON_GetObjectItem(jsonResult, "cdnurl");
       if (!cdnurlArr || cJSON_GetArraySize(cdnurlArr) == 0)
-        throw std::runtime_error("cdnurl missing in response");
+        std::abort();  // exceptions-free build (was: throw)
       cdnUrl = cJSON_GetArrayItem(cdnurlArr, 0)->valuestring;
       cJSON_Delete(jsonResult);
 #else
       auto jsonResult = nlohmann::json::parse(result);
       if (!jsonResult.contains("cdnurl") || jsonResult["cdnurl"].empty())
-        throw std::runtime_error("cdnurl missing in response");
+        std::abort();  // exceptions-free build (was: throw)
       cdnUrl = jsonResult["cdnurl"][0];
 #endif
 
@@ -322,11 +323,9 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
       state = State::READY;
       loadedSemaphore->give();
       return;
-    } catch (std::exception& e) {
-      CSPOT_LOG(error, "Cannot fetch CDN URL (attempt %d): %s", attempt + 1, e.what());
-    } catch (...) {
-      CSPOT_LOG(error, "Cannot fetch CDN URL (attempt %d): unknown", attempt + 1);
     }
+    // exceptions-free build: HTTP-layer failures abort deeper; the loop retries
+    // only the 429 rate-limit path above.
     if (attempt < 4) BELL_SLEEP_MS(2000);
   }
 

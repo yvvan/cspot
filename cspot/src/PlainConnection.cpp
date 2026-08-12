@@ -1,4 +1,5 @@
 #include "PlainConnection.h"
+#include <cstdlib>
 
 #ifndef _WIN32
 #include <netdb.h>  // for addrinfo, freeaddrinfo, getaddrinfo
@@ -94,7 +95,7 @@ void PlainConnection::connect(const std::string& apAddress) {
     ::close(this->apSock);
 #endif
     apSock = -1;
-    throw std::runtime_error("Can't connect to spotify servers");
+    std::abort();  // exceptions-free build (was: throw)
   }
 
   freeaddrinfo(airoot);
@@ -144,14 +145,14 @@ void PlainConnection::readBlock(const uint8_t* dst, size_t size) {
         case ETIMEDOUT:
           if (timeoutHandler()) {
             CSPOT_LOG(error, "Connection lost, will need to reconnect...");
-            throw std::runtime_error("Reconnection required");
+            std::abort();  // exceptions-free build (was: throw)
           }
           goto READ;
         case EINTR:
           break;
         default:
           if (retries++ > 4)
-            throw std::runtime_error("Error in read");
+            std::abort();  // exceptions-free build (was: throw)
           goto READ;
       }
     }
@@ -173,14 +174,14 @@ size_t PlainConnection::writeBlock(const std::vector<uint8_t>& data) {
         case EAGAIN:
         case ETIMEDOUT:
           if (timeoutHandler()) {
-            throw std::runtime_error("Reconnection required");
+            std::abort();  // exceptions-free build (was: throw)
           }
           goto WRITE;
         case EINTR:
           break;
         default:
           if (retries++ > 4)
-            throw std::runtime_error("Error in write");
+            std::abort();  // exceptions-free build (was: throw)
           goto WRITE;
       }
     }
