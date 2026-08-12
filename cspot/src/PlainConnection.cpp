@@ -1,5 +1,6 @@
 #include "PlainConnection.h"
 #include <cstdlib>
+#include "BellUtils.h"  // for BELL_SLEEP_MS
 
 #ifndef _WIN32
 #include <netdb.h>  // for addrinfo, freeaddrinfo, getaddrinfo
@@ -157,6 +158,7 @@ void PlainConnection::readBlock(const uint8_t* dst, size_t size) {
         default:
           if (retries++ > 4)
             std::abort();  // exceptions-free build (was: throw)
+          BELL_SLEEP_MS(200);
           goto READ;
       }
     }
