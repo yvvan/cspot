@@ -1,4 +1,4 @@
 [submodule "cspot/bell"]
 	path = cspot/bell
 	url = https://github.com/yvvan/bell
-	branch = kineto
+	branch = main
