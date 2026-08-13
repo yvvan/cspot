@@ -178,7 +178,13 @@ void TrackPlayer::runTask() {
       currentTrackStream = track->getAudioFile();
 
       // Open the stream
-      currentTrackStream->openStream();
+      if (!currentTrackStream->openStream()) {
+        CSPOT_LOG(error, "Track stream failed to open, skipping it");
+        currentTrackStream = nullptr;
+        currentSongPlaying = false;
+        this->eofCallback();
+        continue;
+      }
 
       if (pendingReset || !currentSongPlaying) {
         continue;

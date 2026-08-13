@@ -2,6 +2,7 @@
 #include "BellUtils.h"
 
 #include <string.h>          // for memcpy
+#include <chrono>            // for steady_clock (chunk-fetch timing)
 #include <functional>        // for __base
 #include <initializer_list>  // for initializer_list
 #include <map>               // for operator!=, operator==
@@ -40,7 +41,7 @@ void CDNAudioFile::seek(size_t newPos) {
   this->position = newPos;
 }
 
-void CDNAudioFile::openStream() {
+bool CDNAudioFile::openStream() {
   CSPOT_LOG(info, "Opening HTTP stream to %s", this->cdnUrl.c_str());
 
   // Open connection, read first 128 bytes
@@ -56,7 +57,7 @@ void CDNAudioFile::openStream() {
   }
   if (this->httpConnection == nullptr) {
     CSPOT_LOG(error, "CDN connection failed permanently");
-    std::abort();  // exceptions-free build: unrecoverable without caller support
+    return false;  // exceptions-free build: caller skips the track
   }
 
   this->httpConnection->stream().read((char*)header.data(), OPUS_HEADER_SIZE);
@@ -83,6 +84,7 @@ void CDNAudioFile::openStream() {
   this->position = 0;
   this->lastRequestPosition = 0;
   this->lastRequestCapacity = 0;
+  return true;
 }
 
 size_t CDNAudioFile::readBytes(uint8_t* dst, size_t bytes) {
@@ -142,6 +144,11 @@ size_t CDNAudioFile::readBytes(uint8_t* dst, size_t bytes) {
       this->enableRequestMargin = false;
     }
 
+    // This refetch sits synchronously on the decode path (one HTTP round-trip
+    // per HTTP_BUFFER_SIZE of audio, i.e. every ~0.5s of playback), so a slow
+    // response directly drains the playback buffer. Time it to correlate
+    // audible lags with CDN/Wi-Fi latency spikes.
+    auto fetchStart = std::chrono::steady_clock::now();
     this->httpConnection->get(
         cdnUrl, {bell::HTTPClient::RangeHeader::range(
                     requestPosition, requestPosition + HTTP_BUFFER_SIZE - 1)});
@@ -150,6 +157,14 @@ size_t CDNAudioFile::readBytes(uint8_t* dst, size_t bytes) {
 
     this->httpConnection->stream().read((char*)this->httpBuffer.data(),
                                         lastRequestCapacity);
+    auto fetchMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - fetchStart)
+                       .count();
+    if (fetchMs > 300) {
+      CSPOT_LOG(info, "CDN chunk fetch slow: %d ms @ pos=%u len=%u",
+                (int)fetchMs, (unsigned)requestPosition,
+                (unsigned)lastRequestCapacity);
+    }
     this->decrypt(this->httpBuffer.data(), lastRequestCapacity,
 
                   this->lastRequestPosition);

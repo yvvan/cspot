@@ -32,7 +32,7 @@ Session::Session() {
 
 Session::~Session() {}
 
-void Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
+bool Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
   this->conn = std::move(connection);
   conn->timeoutHandler = [this]() {
     return this->triggerTimeout();
@@ -40,11 +40,24 @@ void Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
   auto helloPacket = this->conn->sendPrefixPacket(
       {0x00, 0x04}, this->challenges->prepareClientHello());
   auto apResponse = this->conn->recvPacket();
+  // The AP resetting the connection mid-handshake leaves apResponse empty or
+  // truncated; solveApHello would walk past its end (std::length_error, which
+  // aborts in the exceptions-free build). Fail the connect instead — the
+  // caller's retry loop handles it.
+  if (this->conn->isDisconnected() || apResponse.size() <= 4) {
+    CSPOT_LOG(error, "AP hello handshake failed (connection lost, %u bytes)",
+              (unsigned)apResponse.size());
+    return false;
+  }
   CSPOT_LOG(info, "Received APHello response");
 
   auto solvedHello = this->challenges->solveApHello(helloPacket, apResponse);
 
   conn->sendPrefixPacket({}, solvedHello);
+  if (this->conn->isDisconnected()) {
+    CSPOT_LOG(error, "AP handshake failed while sending client response");
+    return false;
+  }
   CSPOT_LOG(debug, "Received shannon keys");
 
   // Generates the public and priv key
@@ -53,6 +66,7 @@ void Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
   // Init shanno-encrypted connection
   this->shanConn->wrapConnection(this->conn, challenges->shanSendKey,
                                  challenges->shanRecvKey);
+  return true;
 }
 
 bool Session::connectWithRandomAp() {
@@ -73,8 +87,7 @@ bool Session::connectWithRandomAp() {
     return false;
   }
 
-  this->connect(std::move(conn));
-  return true;
+  return this->connect(std::move(conn));
 }
 
 std::vector<uint8_t> Session::authenticate(std::shared_ptr<LoginBlob> blob) {
@@ -88,6 +101,10 @@ std::vector<uint8_t> Session::authenticate(std::shared_ptr<LoginBlob> blob) {
   this->shanConn->sendPacket(LOGIN_REQUEST_COMMAND, data);
 
   auto packet = this->shanConn->recvPacket();
+  if (this->shanConn->isDisconnected()) {
+    CSPOT_LOG(error, "Connection lost while waiting for auth response");
+    return std::vector<uint8_t>(0);
+  }
   switch (packet.command) {
     case AUTH_SUCCESSFUL_COMMAND: {
       APWelcome welcome;

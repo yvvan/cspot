@@ -44,6 +44,10 @@ class PlainConnection {
   bool isDisconnected() const { return disconnected; }
 
  private:
+  // Plain (pre-Shannon) packets only carry the AP handshake; anything larger
+  // than this is a corrupted size read off a dying connection.
+  static constexpr uint32_t MAX_PLAIN_PACKET_SIZE = 512 * 1024;
+
   int apSock;
 };
 }  // namespace cspot

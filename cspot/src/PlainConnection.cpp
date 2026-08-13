@@ -15,12 +15,31 @@
 #else
 #include <ws2tcpip.h>
 #endif
+#ifdef ESP_PLATFORM
+#include <esp_heap_caps.h>
+#endif
+
 #include "BellLogger.h"  // for AbstractLogger
 #include "Logger.h"      // for CSPOT_LOG
 #include "Packet.h"      // for cspot
 #include "Utils.h"       // for extract, pack
 
 using namespace cspot;
+
+// Root-cause diagnostics for the ~once-a-minute connection drops: every failure
+// path reports the recv/send return value, the real errno and (on ESP) the
+// internal-heap state, so a server-side close, a socket error and an OOM squeeze
+// are distinguishable in the log.
+static void logSocketFailure(const char* what, ssize_t n, int err, int retry) {
+#ifdef ESP_PLATFORM
+  CSPOT_LOG(error, "%s (n=%d, errno=%d, retry=%d, internal free=%u, largest=%u)",
+            what, (int)n, err, retry,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+#else
+  CSPOT_LOG(error, "%s (n=%d, errno=%d, retry=%d)", what, (int)n, err, retry);
+#endif
+}
 
 static int getErrno() {
 #ifdef _WIN32
@@ -115,10 +134,22 @@ std::vector<uint8_t> PlainConnection::recvPacket() {
   if (disconnected) return {};
   uint32_t packetSize = ntohl(extract<uint32_t>(packetBuffer, 0));
 
+  // A connection dying mid-read yields a garbage size; resize() on it throws
+  // std::length_error (an abort in the exceptions-free build), and a size < 4
+  // underflows the body-read length below. Handshake packets are small — treat
+  // anything implausible as a dead connection.
+  if (packetSize < 4 || packetSize > MAX_PLAIN_PACKET_SIZE) {
+    CSPOT_LOG(error, "recvPacket: implausible packet size %u, marking disconnected",
+              (unsigned)packetSize);
+    disconnected = true;
+    return {};
+  }
+
   packetBuffer.resize(packetSize, 0);
 
   // Read actual data
   readBlock(packetBuffer.data() + 4, packetSize - 4);
+  if (disconnected) return {};
 
   return packetBuffer;
 }
@@ -147,11 +178,21 @@ void PlainConnection::readBlock(const uint8_t* dst, size_t size) {
   while (idx < size) {
   READ:
     if ((n = recv(this->apSock, (char*)&dst[idx], size - idx, 0)) <= 0) {
-      switch (getErrno()) {
+      int err = getErrno();
+      if (n == 0) {
+        // Orderly close by the peer. errno is stale here, so this must not fall
+        // through to the switch below; retrying recv on a closed socket only
+        // burns a second before the same outcome.
+        logSocketFailure("readBlock: peer closed connection", n, err, retries);
+        disconnected = true;
+        return;
+      }
+      switch (err) {
         case EAGAIN:
         case ETIMEDOUT:
           if (timeoutHandler()) {
-            CSPOT_LOG(error, "Connection lost, will need to reconnect...");
+            logSocketFailure("readBlock: receive timeout, connection lost", n,
+                             err, retries);
             disconnected = true;
             return;
           }
@@ -159,6 +200,7 @@ void PlainConnection::readBlock(const uint8_t* dst, size_t size) {
         case EINTR:
           break;
         default:
+          logSocketFailure("readBlock: recv error", n, err, retries);
           if (retries++ > 4) {
             CSPOT_LOG(error, "readBlock: unrecoverable recv error, marking disconnected");
             disconnected = true;
@@ -182,10 +224,18 @@ size_t PlainConnection::writeBlock(const std::vector<uint8_t>& data) {
   WRITE:
     if ((n = send(this->apSock, (char*)&data[idx],
                   data.size() - idx < 64 ? data.size() - idx : 64, 0)) <= 0) {
-      switch (getErrno()) {
+      int err = getErrno();
+      if (n == 0) {
+        logSocketFailure("writeBlock: peer closed connection", n, err, retries);
+        disconnected = true;
+        return 0;
+      }
+      switch (err) {
         case EAGAIN:
         case ETIMEDOUT:
           if (timeoutHandler()) {
+            logSocketFailure("writeBlock: send timeout, connection lost", n,
+                             err, retries);
             disconnected = true;
             return 0;
           }
@@ -193,6 +243,7 @@ size_t PlainConnection::writeBlock(const std::vector<uint8_t>& data) {
         case EINTR:
           break;
         default:
+          logSocketFailure("writeBlock: send error", n, err, retries);
           if (retries++ > 4) {
             CSPOT_LOG(error, "writeBlock: unrecoverable send error, marking disconnected");
             disconnected = true;

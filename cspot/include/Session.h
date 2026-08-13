@@ -31,7 +31,7 @@ class Session {
 
   std::shared_ptr<cspot::ShannonConnection> shanConn;
 
-  void connect(std::unique_ptr<cspot::PlainConnection> connection);
+  bool connect(std::unique_ptr<cspot::PlainConnection> connection);
   bool connectWithRandomAp();
   void close();
   virtual bool triggerTimeout() = 0;

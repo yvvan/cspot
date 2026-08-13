@@ -24,7 +24,7 @@ class CDNAudioFile {
   /**
   * @brief Opens connection to the provided cdn url, and fetches track metadata.
   */
-  void openStream();
+  bool openStream();
 
   /**
   * @brief Read and decrypt part of the cdn stream

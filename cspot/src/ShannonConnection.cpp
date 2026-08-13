@@ -77,6 +77,7 @@ cspot::Packet ShannonConnection::recvPacket() {
   // Read mac
   std::vector<uint8_t> mac(MAC_SIZE);
   this->conn->readBlock(mac.data(), MAC_SIZE);
+  if (this->conn->isDisconnected()) return Packet{0, {}};
 
   // Generate mac
   std::vector<uint8_t> mac2(MAC_SIZE);

@@ -307,20 +307,29 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
       }
       if (sc != 200) {
         CSPOT_LOG(error, "CDN URL HTTP error %d, body: %.*s", sc, (int)result.size(), result.data());
-        std::abort();  // exceptions-free build (was: throw)
+        if (attempt < 4) BELL_SLEEP_MS(2000);
+        continue;  // exhausted retries fall through to State::FAILED below
       }
 
 #ifdef BELL_ONLY_CJSON
       cJSON* jsonResult = cJSON_Parse(result.data());
       cJSON* cdnurlArr = cJSON_GetObjectItem(jsonResult, "cdnurl");
-      if (!cdnurlArr || cJSON_GetArraySize(cdnurlArr) == 0)
-        std::abort();  // exceptions-free build (was: throw)
+      if (!cdnurlArr || cJSON_GetArraySize(cdnurlArr) == 0) {
+        CSPOT_LOG(error, "CDN URL response has no cdnurl (attempt %d)", attempt + 1);
+        cJSON_Delete(jsonResult);
+        if (attempt < 4) BELL_SLEEP_MS(2000);
+        continue;  // exhausted retries fall through to State::FAILED below
+      }
       cdnUrl = cJSON_GetArrayItem(cdnurlArr, 0)->valuestring;
       cJSON_Delete(jsonResult);
 #else
-      auto jsonResult = nlohmann::json::parse(result);
-      if (!jsonResult.contains("cdnurl") || jsonResult["cdnurl"].empty())
-        std::abort();  // exceptions-free build (was: throw)
+      auto jsonResult = nlohmann::json::parse(result, nullptr, false);
+      if (jsonResult.is_discarded() || !jsonResult.contains("cdnurl") ||
+          jsonResult["cdnurl"].empty()) {
+        CSPOT_LOG(error, "CDN URL response has no cdnurl (attempt %d)", attempt + 1);
+        if (attempt < 4) BELL_SLEEP_MS(2000);
+        continue;  // exhausted retries fall through to State::FAILED below
+      }
       cdnUrl = jsonResult["cdnurl"][0];
 #endif
 
@@ -329,8 +338,6 @@ void QueuedTrack::stepLoadCDNUrl(const std::string& accessKey) {
       loadedSemaphore->give();
       return;
     }
-    // exceptions-free build: HTTP-layer failures abort deeper; the loop retries
-    // only the 429 rate-limit path above.
     if (attempt < 4) BELL_SLEEP_MS(2000);
   }
 
