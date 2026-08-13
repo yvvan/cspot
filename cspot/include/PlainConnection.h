@@ -37,6 +37,12 @@ class PlainConnection {
   void readBlock(const uint8_t* dst, size_t size);
   size_t writeBlock(const std::vector<uint8_t>& data);
 
+  // Set when a socket read/write hits an unrecoverable error. The exceptions-free
+  // build can't throw to unwind, so the Mercury loop polls this and reconnects
+  // instead of aborting the whole device.
+  bool disconnected = false;
+  bool isDisconnected() const { return disconnected; }
+
  private:
   int apSock;
 };

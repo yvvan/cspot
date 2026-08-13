@@ -35,6 +35,7 @@ class ShannonConnection {
   void sendPacket(uint8_t cmd, std::vector<uint8_t>& data);
   std::shared_ptr<PlainConnection> conn;
   Packet recvPacket();
+  bool isDisconnected() const;
 };
 }  // namespace cspot
 

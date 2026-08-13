@@ -37,9 +37,14 @@ void MercurySession::runTask() {
   this->executeEstabilishedCallback = true;
   while (isRunning) {
     cspot::Packet packet = {};
-    // exceptions-free build: recv failures currently abort inside the connection
-    // layer; TODO restore the reconnect path via status returns from recvPacket.
     packet = shanConn->recvPacket();
+    if (shanConn->isDisconnected()) {
+      CSPOT_LOG(error, "Connection lost; reconnecting...");
+      failAllPending();
+      if (!isRunning) return;
+      reconnect();
+      continue;
+    }
     CSPOT_LOG(info, "Received packet, command: %d", packet.command);
 
     if (static_cast<RequestType>(packet.command) == RequestType::PING) {
@@ -56,20 +61,23 @@ void MercurySession::runTask() {
 void MercurySession::reconnect() {
   isReconnecting = true;
 
-  this->conn = nullptr;
-  this->shanConn = nullptr;
+  while (isRunning) {
+    this->conn = nullptr;
+    this->shanConn = nullptr;
 
-  this->connectWithRandomAp();
-  this->authenticate(this->authBlob);
+    if (this->connectWithRandomAp() && !this->authenticate(this->authBlob).empty()) {
+      CSPOT_LOG(info, "Reconnection successful");
+      BELL_SLEEP_MS(100);
+      lastPingTimestamp = timeProvider->getSyncedTimestamp();
+      isReconnecting = false;
+      this->executeEstabilishedCallback = true;
+      return;
+    }
 
-  CSPOT_LOG(info, "Reconnection successful");
-
-  BELL_SLEEP_MS(100);
-
-  lastPingTimestamp = timeProvider->getSyncedTimestamp();
+    CSPOT_LOG(error, "Reconnect attempt failed; retrying in 5s");
+    BELL_SLEEP_MS(5000);
+  }
   isReconnecting = false;
-
-  this->executeEstabilishedCallback = true;
 }
 
 void MercurySession::setConnectedHandler(

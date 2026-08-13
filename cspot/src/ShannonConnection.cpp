@@ -61,6 +61,7 @@ cspot::Packet ShannonConnection::recvPacket() {
   std::vector<uint8_t> data(3);
   // Receive 3 bytes, cmd + int16 size
   this->conn->readBlock(data.data(), 3);
+  if (this->conn->isDisconnected()) return Packet{0, {}};
   this->recvCipher->decrypt(data);
 
   auto readSize = ntohs(extract<uint16_t>(data, 1));
@@ -69,6 +70,7 @@ cspot::Packet ShannonConnection::recvPacket() {
   // Read and decode if the packet has an actual body
   if (readSize > 0) {
     this->conn->readBlock(packetData.data(), readSize);
+    if (this->conn->isDisconnected()) return Packet{0, {}};
     this->recvCipher->decrypt(packetData);
   }
 
@@ -104,4 +106,8 @@ std::vector<uint8_t> ShannonConnection::cipherPacket(
   sizeRaw.insert(sizeRaw.end(), data.begin(), data.end());
 
   return sizeRaw;
+}
+
+bool ShannonConnection::isDisconnected() const {
+  return conn == nullptr || conn->isDisconnected();
 }

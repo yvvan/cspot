@@ -104,6 +104,7 @@ bool PlainConnection::connect(const std::string& apAddress) {
 
   freeaddrinfo(airoot);
   CSPOT_LOG(debug, "Connected to spotify server");
+  disconnected = false;
   return true;
 }
 
@@ -111,6 +112,7 @@ std::vector<uint8_t> PlainConnection::recvPacket() {
   // Read packet size
   std::vector<uint8_t> packetBuffer(4);
   readBlock(packetBuffer.data(), 4);
+  if (disconnected) return {};
   uint32_t packetSize = ntohl(extract<uint32_t>(packetBuffer, 0));
 
   packetBuffer.resize(packetSize, 0);
@@ -150,14 +152,18 @@ void PlainConnection::readBlock(const uint8_t* dst, size_t size) {
         case ETIMEDOUT:
           if (timeoutHandler()) {
             CSPOT_LOG(error, "Connection lost, will need to reconnect...");
-            std::abort();  // exceptions-free build (was: throw)
+            disconnected = true;
+            return;
           }
           goto READ;
         case EINTR:
           break;
         default:
-          if (retries++ > 4)
-            std::abort();  // exceptions-free build (was: throw)
+          if (retries++ > 4) {
+            CSPOT_LOG(error, "readBlock: unrecoverable recv error, marking disconnected");
+            disconnected = true;
+            return;
+          }
           BELL_SLEEP_MS(200);
           goto READ;
       }
@@ -180,14 +186,18 @@ size_t PlainConnection::writeBlock(const std::vector<uint8_t>& data) {
         case EAGAIN:
         case ETIMEDOUT:
           if (timeoutHandler()) {
-            std::abort();  // exceptions-free build (was: throw)
+            disconnected = true;
+            return 0;
           }
           goto WRITE;
         case EINTR:
           break;
         default:
-          if (retries++ > 4)
-            std::abort();  // exceptions-free build (was: throw)
+          if (retries++ > 4) {
+            CSPOT_LOG(error, "writeBlock: unrecoverable send error, marking disconnected");
+            disconnected = true;
+            return 0;
+          }
           goto WRITE;
       }
     }
