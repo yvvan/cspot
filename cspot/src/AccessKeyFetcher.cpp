@@ -52,9 +52,26 @@ std::string AccessKeyFetcher::getAccessKey() {
   return accessKey;
 }
 
+void AccessKeyFetcher::onFetchFailed(const char* reason) {
+  consecutiveFailures += 1;
+  long long int delay = RETRY_BASE_MS;
+  for (int i = 1; i < consecutiveFailures && delay < RETRY_MAX_MS; i++) {
+    delay *= 2;
+  }
+  if (delay > RETRY_MAX_MS) {
+    delay = RETRY_MAX_MS;
+  }
+  nextAttemptAt = ctx->timeProvider->getSyncedTimestamp() + delay;
+  CSPOT_LOG(error, "Access token fetch failed (%s), attempt %d; retrying in %d ms",
+            reason, consecutiveFailures, (int)delay);
+}
+
 void AccessKeyFetcher::updateAccessKey() {
   if (keyPending) {
     return;
+  }
+  if (ctx->timeProvider->getSyncedTimestamp() < nextAttemptAt) {
+    return;  // backing off after a failed fetch
   }
   keyPending = true;
 
@@ -68,7 +85,7 @@ void AccessKeyFetcher::updateAccessKey() {
       cspot::MercurySession::RequestType::GET, url,
       [this, timeProvider](cspot::MercurySession::Response& res) {
         if (res.fail || res.parts.empty()) {
-           CSPOT_LOG(error, "Mercury request failed");
+           this->onFetchFailed("mercury request failed");
            this->keyPending = false;
            return;
         }
@@ -83,11 +100,15 @@ void AccessKeyFetcher::updateAccessKey() {
               this->accessKey = token->valuestring;
               int expiresIn = expires ? expires->valueint / 2 : 1800;
               this->expiresAt = timeProvider->getSyncedTimestamp() + (expiresIn * 1000);
+              this->consecutiveFailures = 0;
+              this->nextAttemptAt = 0;
               CSPOT_LOG(info, "Access token fetched successfully");
            } else {
-              CSPOT_LOG(error, "No accessToken in response");
+              this->onFetchFailed("no accessToken in response");
            }
            cJSON_Delete(jsonBody);
+        } else {
+           this->onFetchFailed("unparseable response");
         }
 #else
         auto jsonBody = nlohmann::json::parse(accessJSON, nullptr, false);
@@ -95,9 +116,12 @@ void AccessKeyFetcher::updateAccessKey() {
            this->accessKey = jsonBody["accessToken"];
            int expiresIn = jsonBody.value("expiresIn", 3600) / 2;
            this->expiresAt = timeProvider->getSyncedTimestamp() + (expiresIn * 1000);
+           this->consecutiveFailures = 0;
+           this->nextAttemptAt = 0;
            CSPOT_LOG(info, "Access token fetched successfully");
         } else {
-           CSPOT_LOG(error, "Failed to fetch access token! Response: %s", accessJSON.c_str());
+           CSPOT_LOG(error, "Keymaster rejected the token request: %s", accessJSON.c_str());
+           this->onFetchFailed("bad response");
         }
 #endif
         this->keyPending = false;

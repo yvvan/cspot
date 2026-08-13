@@ -27,14 +27,24 @@ class AccessKeyFetcher {
 
   /**
   * @brief Forces a refresh of the access key
+  * @remark A failed fetch backs off exponentially: the caller polls this on
+  *         every queue tick, and without a backoff a server-side rejection
+  *         turns into hundreds of keymaster requests per minute.
   */
   void updateAccessKey();
 
  private:
+  static constexpr long long int RETRY_BASE_MS = 1000;
+  static constexpr long long int RETRY_MAX_MS = 60000;
+
+  void onFetchFailed(const char* reason);
+
   std::shared_ptr<cspot::Context> ctx;
 
   std::atomic<bool> keyPending = false;
   std::string accessKey;
-  long long int expiresAt;
+  long long int expiresAt = 0;
+  long long int nextAttemptAt = 0;
+  int consecutiveFailures = 0;
 };
 }  // namespace cspot
