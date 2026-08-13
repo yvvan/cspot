@@ -32,7 +32,7 @@ using namespace cspot;
 class CDNAudioFile::ReaderTask : public bell::Task {
  public:
   explicit ReaderTask(CDNAudioFile* owner)
-      : bell::Task("cdn_prefetch", 16 * 1024, 2, 1), owner(owner) {
+      : bell::Task("cdn_prefetch", 32 * 1024, 2, 1), owner(owner) {
     startTask();
   }
 

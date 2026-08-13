@@ -60,12 +60,15 @@ bool Session::connect(std::unique_ptr<cspot::PlainConnection> connection) {
   }
   CSPOT_LOG(debug, "Received shannon keys");
 
-  // Generates the public and priv key
-  this->shanConn = std::make_shared<ShannonConnection>();
-
-  // Init shanno-encrypted connection
-  this->shanConn->wrapConnection(this->conn, challenges->shanSendKey,
-                                 challenges->shanRecvKey);
+  // Build the shannon-encrypted connection fully, then publish it atomically —
+  // senders on other tasks snapshot it via shanConnection().
+  auto newShanConn = std::make_shared<ShannonConnection>();
+  newShanConn->wrapConnection(this->conn, challenges->shanSendKey,
+                              challenges->shanRecvKey);
+  {
+    std::lock_guard<std::mutex> lock(shanConnMutex);
+    this->shanConn = newShanConn;
+  }
   return true;
 }
 

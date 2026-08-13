@@ -62,9 +62,9 @@ void MercurySession::reconnect() {
   isReconnecting = true;
 
   while (isRunning) {
-    this->conn = nullptr;
-    this->shanConn = nullptr;
-
+    // Keep the old (disconnected) connection objects alive until the new ones
+    // replace them: other tasks may still be sending through a snapshot, and a
+    // null here was a LoadProhibited crash.
     if (this->connectWithRandomAp() && !this->authenticate(this->authBlob).empty()) {
       CSPOT_LOG(info, "Reconnection successful");
       BELL_SLEEP_MS(100);
@@ -295,9 +295,14 @@ uint64_t MercurySession::executeSubscription(RequestType method,
   // Bump sequence id
   this->sequenceId += 1;
 
-  this->shanConn->sendPacket(
-      static_cast<std::underlying_type<RequestType>::type>(method),
-      sequenceIdBytes);
+  auto conn = this->shanConnection();
+  if (conn == nullptr || conn->isDisconnected()) {
+    // The pending request is failed by failAllPending() on the reconnect path.
+    CSPOT_LOG(info, "Dropping Mercury request: connection is down");
+    return this->sequenceId - 1;
+  }
+  conn->sendPacket(static_cast<std::underlying_type<RequestType>::type>(method),
+                   sequenceIdBytes);
 
   return this->sequenceId - 1;
 }
@@ -323,7 +328,12 @@ uint32_t MercurySession::requestAudioKey(const std::vector<uint8_t>& trackId,
 
   // Used for broken connection detection
   // this->lastRequestTimestamp = timeProvider->getSyncedTimestamp();
-  this->shanConn->sendPacket(
-      static_cast<uint8_t>(RequestType::AUDIO_KEY_REQUEST_COMMAND), buffer);
+  auto conn = this->shanConnection();
+  if (conn == nullptr || conn->isDisconnected()) {
+    CSPOT_LOG(info, "Dropping audio key request: connection is down");
+    return audioKeySequence - 1;
+  }
+  conn->sendPacket(static_cast<uint8_t>(RequestType::AUDIO_KEY_REQUEST_COMMAND),
+                   buffer);
   return audioKeySequence - 1;
 }
