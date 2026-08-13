@@ -113,6 +113,14 @@ std::vector<uint8_t> Session::authenticate(std::shared_ptr<LoginBlob> blob) {
       APWelcome welcome;
       CSPOT_LOG(debug, "Authorization successful");
       pbDecode(welcome, APWelcome_fields, packet.data);
+      // A token login carries no username — the AP resolves it and answers with the canonical one.
+      // Everything downstream needs it: the Spirc topic is hm://remote/user/<username>/, so without
+      // it the device never registers as a Connect endpoint, and the credentials we persist would
+      // be unusable on the next boot.
+      if (blob->username.empty() && welcome.canonical_username[0] != '\0') {
+        blob->username = std::string(welcome.canonical_username);
+        CSPOT_LOG(info, "Resolved Spotify user: %s", blob->username.c_str());
+      }
       return std::vector<uint8_t>(welcome.reusable_auth_credentials.bytes,
                                   welcome.reusable_auth_credentials.bytes +
                                       welcome.reusable_auth_credentials.size);
