@@ -1,11 +1,27 @@
 ## Fork note
 
-This repository is a fork of cspot with additional AI-assisted code changes
-made to get cspot running on an AI Thinker A1S Audio Kit ESP32 board with the
-ES8388 audio codec. In this setup, cspot eventually ran and worked on my board.
+A fork of [cspot](https://github.com/feelfreelinux/cspot) (based on
+[Hartmannlight/cspot](https://github.com/Hartmannlight/cspot), which carries the
+2026 auth fixes) focused on running the library **as one component among many**
+on an ESP32-S3 smart speaker — alongside a wake-word engine and a voice
+pipeline — rather than as the whole firmware. Main changes:
 
-This fork has not been tested extensively. I later moved to Music Assistant and
-now play Spotify through it, with my Audio Kit board used as a Snapcast client.
+- **Exceptions-free build**: throw/catch paths replaced with status returns and
+  bounded retries, so the library links into firmware built with
+  `-fno-exceptions`.
+- **Connection resilience**: socket errors — including resets in the middle of
+  the AP handshake and races between reconnect and concurrent senders — recover
+  with a reconnect cycle instead of aborting the device.
+- **CDN prefetch**: track audio is downloaded and decrypted ahead of the decoder
+  by a dedicated low-priority reader task, so network latency spikes (Wi-Fi
+  retransmissions, slow CDN responses) no longer stall playback.
+- **PSRAM-friendly**: task stacks and large buffers live in external RAM,
+  keeping scarce internal DRAM for Wi-Fi/DMA.
+- **Diagnostics**: every socket/CDN failure path logs errno, retry count and
+  heap state.
+
+The bell submodule points at [yvvan/bell](https://github.com/yvvan/bell) with
+the matching exceptions-free and PSRAM changes.
 
 ![C/C++ CI](https://github.com/feelfreelinux/cspot/workflows/C/C++%20CI/badge.svg)
 ![ESP IDF](https://github.com/feelfreelinux/cspot/workflows/ESP%20IDF/badge.svg)
