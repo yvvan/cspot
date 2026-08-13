@@ -222,8 +222,10 @@ size_t PlainConnection::writeBlock(const std::vector<uint8_t>& data) {
 
   while (idx < data.size()) {
   WRITE:
-    if ((n = send(this->apSock, (char*)&data[idx],
-                  data.size() - idx < 64 ? data.size() - idx : 64, 0)) <= 0) {
+    // Send the whole remainder: TCP_NODELAY is set and lwIP segments on its
+    // own; the historical 64-byte slices just multiplied syscalls.
+    if ((n = send(this->apSock, (char*)&data[idx], data.size() - idx, 0)) <=
+        0) {
       int err = getErrno();
       if (n == 0) {
         logSocketFailure("writeBlock: peer closed connection", n, err, retries);
