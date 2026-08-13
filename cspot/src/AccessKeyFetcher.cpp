@@ -10,9 +10,13 @@
 #include "CSpotContext.h"  // for Context
 #include "HTTPClient.h"
 #include "Logger.h"            // for CSPOT_LOG
+#include "NanoPBExtensions.h"  // for bell::nanopb::encodeString/encodeVector
+#include "NanoPBHelper.h"      // for pbEncode / pbDecode
 #include "MercurySession.h"    // for MercurySession, MercurySession::Res...
 #include "TimeProvider.h"
 #include "Utils.h"
+
+#include "protobuf/login5.pb.h"  // for LoginRequest / LoginResponse
 
 #ifdef BELL_ONLY_CJSON
 #include "cJSON.h"
@@ -24,8 +28,8 @@
 
 using namespace cspot;
 
-// Client ID and secret are set via ctx->config.clientId / clientSecret
-// (registered Spotify app — never hardcode here)
+// Spotify's web client id, the one login5 accepts for stored-credential logins.
+static std::string CLIENT_ID = "65b708073fc0480ea92a077233ca87bd";
 
 AccessKeyFetcher::AccessKeyFetcher(std::shared_ptr<cspot::Context> ctx)
     : ctx(ctx) {}
@@ -75,55 +79,60 @@ void AccessKeyFetcher::updateAccessKey() {
   }
   keyPending = true;
 
-  auto timeProvider = this->ctx->timeProvider;
-  
-  std::string url = string_format(
-      "hm://keymaster/token/authenticated?client_id=9a8d2f0ce77a4e248bb71fefcb557637&device_id=%s&scope=streaming",
-      this->ctx->config.deviceId.c_str());
+  // login5, not the Mercury keymaster: Spotify is retiring keymaster, and by 2026-08 it answers
+  // every token request with {"code":2,"errorDescription":"Invalid client"} — playback then dies
+  // at CDN-URL resolution with a perfectly healthy session. This is the upstream cspot path
+  // (also where librespot went), restored on top of this fork's backoff.
+  LoginRequest loginRequest = LoginRequest_init_zero;
+  LoginResponse loginResponse = LoginResponse_init_zero;
 
-  ctx->session->execute(
-      cspot::MercurySession::RequestType::GET, url,
-      [this, timeProvider](cspot::MercurySession::Response& res) {
-        if (res.fail || res.parts.empty()) {
-           this->onFetchFailed("mercury request failed");
-           this->keyPending = false;
-           return;
-        }
-        char* accessKeyJson = (char*)res.parts[0].data();
-        auto accessJSON = std::string(accessKeyJson, strrchr(accessKeyJson, '}') - accessKeyJson + 1);
-#ifdef BELL_ONLY_CJSON
-        cJSON* jsonBody = cJSON_Parse(accessJSON.c_str());
-        if (jsonBody) {
-           cJSON* token = cJSON_GetObjectItem(jsonBody, "accessToken");
-           cJSON* expires = cJSON_GetObjectItem(jsonBody, "expiresIn");
-           if (token && token->valuestring) {
-              this->accessKey = token->valuestring;
-              int expiresIn = expires ? expires->valueint / 2 : 1800;
-              this->expiresAt = timeProvider->getSyncedTimestamp() + (expiresIn * 1000);
-              this->consecutiveFailures = 0;
-              this->nextAttemptAt = 0;
-              CSPOT_LOG(info, "Access token fetched successfully");
-           } else {
-              this->onFetchFailed("no accessToken in response");
-           }
-           cJSON_Delete(jsonBody);
-        } else {
-           this->onFetchFailed("unparseable response");
-        }
-#else
-        auto jsonBody = nlohmann::json::parse(accessJSON, nullptr, false);
-        if (!jsonBody.is_discarded() && jsonBody.contains("accessToken")) {
-           this->accessKey = jsonBody["accessToken"];
-           int expiresIn = jsonBody.value("expiresIn", 3600) / 2;
-           this->expiresAt = timeProvider->getSyncedTimestamp() + (expiresIn * 1000);
-           this->consecutiveFailures = 0;
-           this->nextAttemptAt = 0;
-           CSPOT_LOG(info, "Access token fetched successfully");
-        } else {
-           CSPOT_LOG(error, "Keymaster rejected the token request: %s", accessJSON.c_str());
-           this->onFetchFailed("bad response");
-        }
-#endif
-        this->keyPending = false;
-      });
+  loginRequest.client_info.client_id.funcs.encode = &bell::nanopb::encodeString;
+  loginRequest.client_info.client_id.arg = &CLIENT_ID;
+  loginRequest.client_info.device_id.funcs.encode = &bell::nanopb::encodeString;
+  loginRequest.client_info.device_id.arg = &ctx->config.deviceId;
+
+  loginRequest.which_login_method = LoginRequest_stored_credential_tag;
+  loginRequest.login_method.stored_credential.username.funcs.encode =
+      &bell::nanopb::encodeString;
+  loginRequest.login_method.stored_credential.username.arg = &ctx->config.username;
+  loginRequest.login_method.stored_credential.data.funcs.encode =
+      &bell::nanopb::encodeVector;
+  loginRequest.login_method.stored_credential.data.arg = &ctx->config.authData;
+
+  auto encodedRequest = pbEncode(LoginRequest_fields, &loginRequest);
+  CSPOT_LOG(info, "Fetching access token via login5 (%u bytes)",
+            (unsigned)encodedRequest.size());
+
+  auto response = bell::HTTPClient::post(
+      "https://login5.spotify.com/v3/login",
+      {{"Content-Type", "application/x-protobuf"}}, encodedRequest);
+  if (response == nullptr) {
+    onFetchFailed("login5 request failed");
+    keyPending = false;
+    return;
+  }
+
+  auto responseBytes = response->bytes();
+  pbDecode(loginResponse, LoginResponse_fields, responseBytes);
+
+  if (loginResponse.which_response == LoginResponse_ok_tag) {
+    accessKey = std::string(loginResponse.response.ok.access_token);
+    // Refresh at half the advertised lifetime, so a turn never races the expiry.
+    int expiresIn = loginResponse.response.ok.has_access_token_expires_in
+                        ? loginResponse.response.ok.access_token_expires_in / 2
+                        : 1800;
+    expiresAt = ctx->timeProvider->getSyncedTimestamp() + (expiresIn * 1000);
+    consecutiveFailures = 0;
+    nextAttemptAt = 0;
+    CSPOT_LOG(info, "Access token fetched successfully (expires in %d s)", expiresIn * 2);
+  } else if (loginResponse.which_response == LoginResponse_error_tag) {
+    CSPOT_LOG(error, "login5 error %d", (int)loginResponse.response.error);
+    onFetchFailed("login5 refused the stored credential");
+  } else {
+    // Anything else (e.g. a proof-of-work challenge, which this build does not solve).
+    onFetchFailed("login5 answered with neither a token nor an error");
+  }
+
+  pb_release(LoginResponse_fields, &loginResponse);
+  keyPending = false;
 }
