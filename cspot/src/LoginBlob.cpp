@@ -148,14 +148,6 @@ void LoginBlob::loadUserPass(const std::string& username,
       static_cast<uint32_t>(AuthenticationType_AUTHENTICATION_USER_PASS);
 }
 
-void LoginBlob::loadAccessToken(const std::string& accessToken) {
-  // Username is resolved by the AP from the token itself (it comes back in APWelcome).
-  this->username = "";
-  this->authData = std::vector<uint8_t>(accessToken.begin(), accessToken.end());
-  this->authType =
-      static_cast<uint32_t>(AuthenticationType_AUTHENTICATION_SPOTIFY_TOKEN);
-}
-
 void LoginBlob::loadJson(const std::string& json) {
 #ifdef BELL_ONLY_CJSON
   cJSON* root = cJSON_Parse(json.c_str());

@@ -34,8 +34,6 @@ class LoginBlob {
                     const std::vector<uint8_t>& sharedKey,
                     const std::string& deviceId, const std::string& username);
   void loadUserPass(const std::string& username, const std::string& password);
-  /** Log in with an OAuth access token; the AP answers with reusable credentials to store. */
-  void loadAccessToken(const std::string& accessToken);
   void loadJson(const std::string& json);
 
   std::string buildZeroconfInfo();
