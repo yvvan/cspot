@@ -91,9 +91,14 @@ class CDNAudioFile {
 
   // --- prefetch ring ---
   // A dedicated reader task keeps the next chunks downloaded and decrypted
-  // ahead of the decoder, so a CDN/Wi-Fi latency spike (measured 1-10s on
-  // Wi-Fi packet loss) drains the ring instead of stalling the audio path.
-  static constexpr size_t PREFETCH_CHUNK_COUNT = 8;  // x 14KB ≈ 112KB (PSRAM)
+  // ahead of the decoder, so a CDN/Wi-Fi latency spike drains the ring instead
+  // of stalling the audio path.
+  //
+  // Depth is set by the worst stall to ride out, not by the average one. On a busy 2.4 GHz
+  // channel single 14KB GETs have been measured taking 10s and once 22s, while the link
+  // itself stayed healthy (RSSI -35 dB, the control WebSocket never dropped) — 8 chunks
+  // covered ~6s of audio and those stalls went straight through as silence.
+  static constexpr size_t PREFETCH_CHUNK_COUNT = 32;  // x 14KB ≈ 450KB (PSRAM) ≈ 22s of audio
 
   struct PrefetchChunk {
     size_t position = 0;  // absolute offset in the encrypted CDN file
